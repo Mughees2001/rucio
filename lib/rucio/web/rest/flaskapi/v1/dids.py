@@ -2067,6 +2067,74 @@ class NewDIDs(ErrorHandlingMethodView):
 
         return try_stream(generate(_type=type_param, vo=request.environ.get('vo')))
 
+class ListDIDsWithDetails(ErrorHandlingMethodView):
+
+    @check_accept_header_wrapper_flask(['application/json'])
+    def get(self, scope):
+        """
+        ---
+        summary: List DIDs with Details
+        description: Returns a list of DIDs with their detailed information in a single response.
+        tags:
+          - Data Identifiers
+        parameters:
+        - name: scope
+          in: path
+          description: The scope of the data identifiers.
+          schema:
+            type: string
+          style: simple
+        - name: type
+          in: query
+          description: The did type to search for.
+          schema:
+            type: string
+            enum: ['all', 'collection', 'container', 'dataset', 'file']
+            default: 'collection'
+        - name: limit
+          in: query
+          description: The maximum number of dids returned.
+          schema:
+            type: integer
+        - name: recursive
+          in: query
+          description: Recursively list children.
+          schema:
+            type: boolean
+        responses:
+          200:
+            description: OK
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    type: object
+                    description: Detailed information of a DID.
+          401:
+            description: Invalid Auth Token
+          404:
+            description: Invalid key in filter.
+          406:
+            description: Not acceptable
+          409:
+            description: Wrong did type
+        """
+        try:
+            did_type = request.args.get('type', default='collection')
+            limit = request.args.get('limit', default=None)
+            recursive = request.args.get('recursive', type=bool, default=False)
+
+            dids = list_dids(scope=scope, filters=[], did_type=did_type, limit=limit, long=True, recursive=recursive, vo=request.environ.get('vo'))
+            detailed_dids = [get_did(scope=did['scope'], name=did['name'], vo=request.environ.get('vo')) for did in dids]
+
+            return Response(render_json(**{'dids': detailed_dids}), content_type='application/json')
+        except DataIdentifierNotFound as error:
+            return generate_http_error_flask(404, error)
+        except UnsupportedOperation as error:
+            return generate_http_error_flask(409, error)
+        except KeyNotFound as error:
+            return generate_http_error_flask(404, error)
 
 class Resurrect(ErrorHandlingMethodView):
 
@@ -2328,6 +2396,8 @@ def blueprint():
     bp.add_url_rule('/bulkmeta', view_func=bulkmeta_view, methods=['post', ])
     files_view = BulkFiles.as_view('bulkfiles')
     bp.add_url_rule('/bulkfiles', view_func=files_view, methods=['post', ])
+    list_dids_with_details_view = ListDIDsWithDetails.as_view('list_dids_with_details')
+    bp.add_url_rule('/<scope>/dids/list', view_func=list_dids_with_details_view, methods=['get', ])
 
     bp.after_request(response_headers)
     return bp
